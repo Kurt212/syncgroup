@@ -14,19 +14,18 @@ func (m MyErr) Error() string {
 	return m.a
 }
 
-
 func TestListenTo(t *testing.T) {
 	as := assert.New(t)
 
 	sg := &SyncGroup{
 		wg:           sync.WaitGroup{},
-		finishedChan: make(chan string),
+		finishedChan: make(chan []error),
 		errorChan:    make(chan error),
 	}
 
 	go sg.listenToErrors()
 
-	expected := "err1;err2;err3;"
+	expected := []error{MyErr{"err1"}, MyErr{"err2"}, MyErr{"err3"}}
 
 	sg.errorChan <- MyErr{"err1"}
 	sg.errorChan <- MyErr{"err2"}
@@ -34,7 +33,7 @@ func TestListenTo(t *testing.T) {
 
 	close(sg.errorChan)
 
-	res := <- sg.finishedChan
+	res := <-sg.finishedChan
 
 	as.Equal(expected, res)
 }
@@ -82,7 +81,6 @@ func TestSyncBad1(t *testing.T) {
 	as.NotNil(err)
 	as.Equal("123;", err.Error())
 }
-
 
 func TestSyncBad2(t *testing.T) {
 	as := assert.New(t)

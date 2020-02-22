@@ -9,14 +9,27 @@ import (
 type SyncGroup struct {
 	wg sync.WaitGroup
 
-	finishedChan chan string
+	finishedChan chan []error
 	errorChan    chan error
+}
+
+type GroupError struct {
+	Errs []error
+}
+
+func (e GroupError) Error() string {
+	var accumulated string
+	for _, err := range e.Errs {
+		accumulated += err.Error() + ";"
+	}
+
+	return accumulated
 }
 
 func New() *SyncGroup {
 	g := &SyncGroup{
 		wg:           sync.WaitGroup{},
-		finishedChan: make(chan string),
+		finishedChan: make(chan []error),
 		errorChan:    make(chan error),
 	}
 
@@ -26,18 +39,18 @@ func New() *SyncGroup {
 }
 
 func (g *SyncGroup) listenToErrors() {
-	var accumulatedErrorMsg string
+	var accumulatedErrors []error
 
 	for {
 		err, ok := <-g.errorChan
 		if ok {
-			accumulatedErrorMsg += err.Error() + ";"
+			accumulatedErrors = append(accumulatedErrors, err)
 		} else {
 			break
 		}
 	}
 
-	g.finishedChan <- accumulatedErrorMsg
+	g.finishedChan <- accumulatedErrors
 	close(g.finishedChan)
 
 	return
@@ -73,11 +86,11 @@ func (g *SyncGroup) Wait() error {
 	g.wg.Wait()
 	close(g.errorChan)
 
-	errMsg := <-g.finishedChan
+	errs := <-g.finishedChan
 
-	if errMsg == "" {
+	if len(errs) == 0 {
 		return nil
 	}
 
-	return errors.New(errMsg)
+	return GroupError{Errs:errs}
 }
