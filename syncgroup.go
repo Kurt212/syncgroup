@@ -11,6 +11,8 @@ type SyncGroup struct {
 
 	finishedChan chan []error
 	errorChan    chan error
+
+	listeningStarted bool
 }
 
 type GroupError struct {
@@ -32,8 +34,6 @@ func New() *SyncGroup {
 		finishedChan: make(chan []error),
 		errorChan:    make(chan error),
 	}
-
-	go g.listenToErrors()
 
 	return g
 }
@@ -57,6 +57,11 @@ func (g *SyncGroup) listenToErrors() {
 }
 
 func (g *SyncGroup) Go(f func() error) {
+	if !g.listeningStarted {
+		go g.listenToErrors()
+		g.listeningStarted = true
+	}
+
 	g.wg.Add(1)
 	go func() {
 		defer g.wg.Done()
@@ -92,5 +97,5 @@ func (g *SyncGroup) Wait() error {
 		return nil
 	}
 
-	return GroupError{Errs:errs}
+	return GroupError{Errs: errs}
 }
