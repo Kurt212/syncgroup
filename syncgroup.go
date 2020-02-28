@@ -1,7 +1,6 @@
 package syncgroup
 
 import (
-	"fmt"
 	"github.com/pkg/errors"
 	"sync"
 )
@@ -64,19 +63,17 @@ func (g *SyncGroup) Go(f func() error) {
 
 	g.wg.Add(1)
 	go func() {
-		defer g.wg.Done()
-
 		defer func() {
 			if msg := recover(); msg != nil {
 				switch msg.(type) {
 				case error:
 					g.errorChan <- errors.Wrap(msg.(error), "recovered from panic")
-				case fmt.Stringer:
-					g.errorChan <- errors.Errorf("recovered from panic:%s", msg.(fmt.Stringer).String())
 				default:
 					g.errorChan <- errors.Errorf("recovered from panic:%v", msg)
 				}
 			}
+
+			g.wg.Done()
 		}()
 
 		err := f()
