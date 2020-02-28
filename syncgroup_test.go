@@ -1,6 +1,7 @@
 package syncgroup
 
 import (
+	"errors"
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
@@ -103,4 +104,27 @@ func TestSyncBad2(t *testing.T) {
 
 	as.NotNil(err)
 	as.Contains([]string{"123;456;", "456;123;"}, err.Error())
+}
+
+func TestSameErrors(t *testing.T) {
+	as := assert.New(t)
+
+	err1 := errors.New("i am err1")
+	err2 := errors.New("i am err2")
+
+	sg := New()
+
+	sg.Go(func() error {
+		return err1
+	})
+
+	sg.Go(func() error {
+		return err2
+	})
+
+	res := sg.Wait().(GroupError)
+
+	as.Len(res.Errs, 2)
+	as.Contains(res.Errs, err1)
+	as.Contains(res.Errs, err2)
 }
