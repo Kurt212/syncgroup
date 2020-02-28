@@ -2,6 +2,7 @@ package syncgroup
 
 import (
 	"github.com/pkg/errors"
+	"strings"
 	"sync"
 )
 
@@ -19,12 +20,14 @@ type GroupError struct {
 }
 
 func (e GroupError) Error() string {
-	var accumulated string
+	builder := strings.Builder{}
+
 	for _, err := range e.Errs {
-		accumulated += err.Error() + ";"
+		builder.WriteString(err.Error())
+		builder.WriteString(";")
 	}
 
-	return accumulated
+	return builder.String()
 }
 
 func New() *SyncGroup {
