@@ -128,3 +128,11 @@ func TestSameErrors(t *testing.T) {
 	as.Contains(res.Errs, err1)
 	as.Contains(res.Errs, err2)
 }
+
+func TestNoGoroutines(t *testing.T) {
+	as := assert.New(t)
+	sg := New()
+
+	err := sg.Wait()
+	as.Nil(err)
+}

@@ -1,3 +1,10 @@
+// This is a package that contains an implementation of an abstract
+// synchronisation mechanism - synchronisation group.
+// The main idea is to have an ability to run independent tasks in separate goroutines which way return errors.
+// A user can wait until all goroutines finish running and collect all occurred errors.
+//
+// The design is similar to errgroup (https://godoc.org/golang.org/x/sync/errgroup),
+// but it does not cancel the context of the goroutines if any of them returns an error.
 package syncgroup
 
 import (
@@ -6,6 +13,14 @@ import (
 	"sync"
 )
 
+// SyncGroup is the main class for working with syncgroups.
+// It has two main methods: .Go() and .Wait()
+//
+// .Go() spawns a new goroutine, which may return an error.
+// The returned error will be saved and returned by .Wait() method.
+//
+// .Wait() waits until all spawned goroutines finish and returns an Error struct which is a wrapper for a slice of errors.
+// If there was no error, .Wait() would return nil, otherwise it would return GroupError instance.
 type SyncGroup struct {
 	wg sync.WaitGroup
 
@@ -15,21 +30,26 @@ type SyncGroup struct {
 	listeningStarted bool
 }
 
+// GroupError is a wrapper for errors which are returned by functions called in spawned goroutines.
 type GroupError struct {
 	Errs []error
 }
 
+// Error concatenates all stored errors with ';' symbol and returns a resulting string.
 func (e GroupError) Error() string {
 	builder := strings.Builder{}
 
 	for _, err := range e.Errs {
-		builder.WriteString(err.Error())
-		builder.WriteString(";")
+		if err != nil {
+			builder.WriteString(err.Error())
+			builder.WriteString(";")
+		}
 	}
 
 	return builder.String()
 }
 
+// New is the default constructor for SyncGroup
 func New() *SyncGroup {
 	g := &SyncGroup{
 		wg:           sync.WaitGroup{},
@@ -58,6 +78,8 @@ func (g *SyncGroup) listenToErrors() {
 	return
 }
 
+// Go spawns given function in a new goroutine.
+// The returned error will be saved and returned by .Wait() method.
 func (g *SyncGroup) Go(f func() error) {
 	if !g.listeningStarted {
 		go g.listenToErrors()
@@ -87,7 +109,16 @@ func (g *SyncGroup) Go(f func() error) {
 	}()
 }
 
+// Wait waits until all spawned goroutines are finished and returns a wrapper struct for all collected errors.
+// The result is nil if none of the spawned goroutines returned an error
+//
+// The result is guaranteed to be an instance of GroupError, so that you can access the stored errors directly.
+// If you only need to check the absence of errors, then only check for nil value.
 func (g *SyncGroup) Wait() error {
+	if !g.listeningStarted {
+		return nil
+	}
+
 	g.wg.Wait()
 	close(g.errorChan)
 
