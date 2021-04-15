@@ -27,7 +27,8 @@ type SyncGroup struct {
 	finishedChan chan []error
 	errorChan    chan error
 
-	listeningStarted bool
+	listeningStarted        bool
+	listeningRoutineStarter *sync.Once
 }
 
 // GroupError is a wrapper for errors which are returned by functions called in spawned goroutines.
@@ -52,9 +53,10 @@ func (e GroupError) Error() string {
 // New is the default constructor for SyncGroup
 func New() *SyncGroup {
 	g := &SyncGroup{
-		wg:           sync.WaitGroup{},
-		finishedChan: make(chan []error),
-		errorChan:    make(chan error),
+		wg:                      sync.WaitGroup{},
+		listeningRoutineStarter: new(sync.Once),
+		finishedChan:            make(chan []error),
+		errorChan:               make(chan error),
 	}
 
 	return g
@@ -63,13 +65,8 @@ func New() *SyncGroup {
 func (g *SyncGroup) listenToErrors() {
 	var accumulatedErrors []error
 
-	for {
-		err, ok := <-g.errorChan
-		if ok {
-			accumulatedErrors = append(accumulatedErrors, err)
-		} else {
-			break
-		}
+	for err := range g.errorChan {
+		accumulatedErrors = append(accumulatedErrors, err)
 	}
 
 	g.finishedChan <- accumulatedErrors
@@ -81,10 +78,10 @@ func (g *SyncGroup) listenToErrors() {
 // Go spawns given function in a new goroutine.
 // The returned error will be saved and returned by .Wait() method.
 func (g *SyncGroup) Go(f func() error) {
-	if !g.listeningStarted {
+	g.listeningRoutineStarter.Do(func() {
 		go g.listenToErrors()
 		g.listeningStarted = true
-	}
+	})
 
 	g.wg.Add(1)
 	go func() {
@@ -94,7 +91,7 @@ func (g *SyncGroup) Go(f func() error) {
 				case error:
 					g.errorChan <- errors.Wrap(msg.(error), "recovered from panic")
 				default:
-					g.errorChan <- errors.Errorf("recovered from panic:%v", msg)
+					g.errorChan <- errors.Errorf("recovered from panic: %v", msg)
 				}
 			}
 
