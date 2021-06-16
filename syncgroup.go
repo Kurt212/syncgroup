@@ -9,6 +9,7 @@ package syncgroup
 
 import (
 	"github.com/pkg/errors"
+	"runtime/debug"
 	"strings"
 	"sync"
 )
@@ -91,7 +92,7 @@ func (g *SyncGroup) Go(f func() error) {
 				case error:
 					g.errorChan <- errors.Wrap(msg.(error), "recovered from panic")
 				default:
-					g.errorChan <- errors.Errorf("recovered from panic: %v", msg)
+					g.errorChan <- errors.Errorf("recovered from panic: %v\n%s", msg, string(debug.Stack()))
 				}
 			}
 

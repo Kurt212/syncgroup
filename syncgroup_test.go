@@ -3,6 +3,7 @@ package syncgroup
 import (
 	"errors"
 	"github.com/stretchr/testify/assert"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -135,4 +136,25 @@ func TestNoGoroutines(t *testing.T) {
 
 	err := sg.Wait()
 	as.Nil(err)
+}
+
+func TestHasStacktrace(t *testing.T) {
+	as := assert.New(t)
+
+	sg := New()
+
+	sg.Go(func() error {
+		panic("aaabbb")
+	})
+
+	err := sg.Wait().(GroupError)
+
+	as.Len(err.Errs, 1)
+
+	recErr := err.Errs[0].Error()
+
+	const startsWith = "recovered from panic: aaabbb\n"
+
+	as.True(len(recErr) > len(startsWith))
+	as.True(strings.HasPrefix(recErr, startsWith))
 }
