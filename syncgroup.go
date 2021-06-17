@@ -88,12 +88,7 @@ func (g *SyncGroup) Go(f func() error) {
 	go func() {
 		defer func() {
 			if msg := recover(); msg != nil {
-				switch msg.(type) {
-				case error:
-					g.errorChan <- errors.Wrap(msg.(error), "recovered from panic")
-				default:
-					g.errorChan <- errors.Errorf("recovered from panic: %v\n%s", msg, string(debug.Stack()))
-				}
+				g.errorChan <- errors.Errorf("recovered from panic: %v\n%s", msg, string(debug.Stack()))
 			}
 
 			g.wg.Done()
