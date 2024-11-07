@@ -3,7 +3,7 @@ package syncgroup
 import (
 	"testing"
 
-	"github.com/Kurt212/syncgroup/internal/testutil"
+	"github.com/kurt212/syncgroup/internal/testutil"
 )
 
 type MyError struct {

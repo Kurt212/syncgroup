@@ -1,4 +1,4 @@
-module github.com/Kurt212/syncgroup
+module github.com/kurt212/syncgroup
 
 go 1.22.1
 
