@@ -1,6 +1,12 @@
 ### Syncgroup
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/kurt212/syncgroup.svg)](https://godoc.org/github.com/kurt212/syncgroup)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kurt212/syncgroup)](https://goreportcard.com/report/github.com/kurt212/syncgroup)
+![Build Status](https://github.com/kurt212/syncgroup/actions/workflows/ci.yml/badge.svg)
+![GitHub issues](https://img.shields.io/github/issues/kurt212/syncgroup)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/kurt212/syncgroup)
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/kurt212/syncgroup.svg)](https://pkg.go.dev/github.com/kurt212/syncgroup)
+![Go Version](https://img.shields.io/github/go-mod/go-version/kurt212/syncgroup)
 
 This is a package that contains an implementation of an abstract
 synchronisation mechanism - synchronisation group.
@@ -49,3 +55,20 @@ func main() {
 	sg.Wait()
 }
 ```
+
+## Contributing
+
+Feel free to contribute to this project. You can report bugs, suggest features or submit pull requests.
+
+Before submitting a bug report or a feature request, check if there is an existing one and provide as much information as possible.
+
+### Submitting a pull request
+
+1. Fork it
+2. Create your feature branch (`git checkout -b my-new-feature`)
+3. Run checks (`make all`)
+4. Commit your changes (`git commit -am 'Add some feature'`)
+5. Push to the branch (`git push origin my-new-feature`)
+6. Create a new Pull Request
+7. Wait for CI to pass
+8. Profit! 🎉
