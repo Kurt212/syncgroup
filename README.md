@@ -1,4 +1,4 @@
-### Syncgroup
+# Syncgroup
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/kurt212/syncgroup)](https://goreportcard.com/report/github.com/kurt212/syncgroup)
 ![Build Status](https://github.com/kurt212/syncgroup/actions/workflows/ci.yml/badge.svg)
@@ -8,13 +8,27 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/kurt212/syncgroup.svg)](https://pkg.go.dev/github.com/kurt212/syncgroup)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/kurt212/syncgroup)
 
-This is a package that contains an implementation of an abstract
-synchronisation mechanism - synchronisation group.
-The main idea is to have an ability to run independent tasks in separate goroutines which way return errors.
-A user can wait until all goroutines finish running and collect all occurred errors.
+## Introduction
 
-The design is similar to errgroup (https://godoc.org/golang.org/x/sync/errgroup),
-but it does not cancel the context of the goroutines if any of them returns an error.
+Syncgroup is a Go package that provides an abstract synchronization mechanism, allowing you to run independent tasks in separate goroutines and collect all occurred errors. It is similar to `errgroup` but does not cancel the context of the goroutines if any of them returns an error.
+
+## Key Features
+
+- **Convenient API**: Run goroutines and wait for their completion with `sg.Go(func() error)` and `sg.Wait()`.
+- **Error Handling**: Collects all errors from goroutines and returns them as a single error, wrapped according to [Go 1.13 errors wrapping rules](https://go.dev/blog/go1.13-errors).
+- **Panic Recovery**: Recovers panics in goroutines and returns them as errors.
+- **Concurrency Limiting**: Set a limit on the number of concurrent goroutines.
+
+## Differences from Industry Standards
+
+**SyncGroup** offers several enhancements over `sync.WaitGroup` and `errgroup`:
+
+- **Better API**: Simplified and more convenient.
+- **Error Handling**: Automatically collects and returns all errors.
+- **Panic Recovery**: Recovers from panics and returns them as errors.
+- **Concurrency Limiting**: Allows setting a limit on concurrent goroutines.
+- **Comprehensive Error Collection**: Unlike `errgroup`, `SyncGroup` does not cancel the context of the goroutines if any of them returns an error. 
+`errgroup` is designed to obtain the result only if all jobs are successful. When multiple errors occur, `errgroup` only returns the first one and ignores the rest.
 
 ## Documentation
 See more on [godoc site](https://godoc.org/github.com/kurt212/syncgroup)
@@ -101,7 +115,7 @@ func main() {
 }
 ```
 
-Limit number of concurrent goroutines.
+Limit the number of concurrent goroutines.
 
 ```go
 package main
