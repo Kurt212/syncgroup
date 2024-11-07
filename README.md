@@ -29,6 +29,8 @@ go get github.com/kurt212/syncgroup
 
 ### Example
 
+Run goroutines in parallel and wait until all of them finish.
+
 ```go
 package main
 
@@ -47,6 +49,80 @@ func main() {
 			time.Sleep(1 * time.Second)
 
 			fmt.Printf("Hello from %d\n", i)
+
+			return nil
+		})
+	}
+
+	sg.Wait()
+}
+```
+
+Collect errors from goroutines.
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/kurt212/syncgroup"
+)
+
+func main() {
+	sg := syncgroup.New()
+
+	for i := range 10 {
+		sg.Go(func() error {
+			time.Sleep(1 * time.Second)
+
+			return fmt.Errorf("error %d", i)
+		})
+	}
+
+	err := sg.Wait()
+	if err != nil {
+		/*
+			Expected output:
+			error 1
+			error 3
+			error 2
+			error 4
+			error 6
+			error 5
+			error 0
+			error 9
+			error 7
+			error 8
+		 */
+		fmt.Println(err)
+	}
+}
+```
+
+Limit number of concurrent goroutines.
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/kurt212/syncgroup"
+)
+
+func main() {
+	sg := syncgroup.New()
+
+	sg.SetLimit(2)
+
+	for i := range 10 {
+		sg.Go(func() error {
+			fmt.Printf("Go %d\n", i)
+
+			time.Sleep(1 * time.Second)
 
 			return nil
 		})
