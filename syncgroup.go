@@ -1,4 +1,4 @@
-// This is a package that contains an implementation of an abstract
+// Package syncgroup package that contains an implementation of an abstract
 // synchronisation mechanism - synchronisation group.
 // The main idea is to have an ability to run independent tasks in separate goroutines which way return errors.
 // A user can wait until all goroutines finish running and collect all occurred errors.
@@ -8,107 +8,173 @@
 package syncgroup
 
 import (
-	"github.com/pkg/errors"
+	"errors"
+	"fmt"
 	"runtime/debug"
-	"strings"
 	"sync"
+	"sync/atomic"
 )
 
-// SyncGroup is the main class for working with syncgroups.
-// It has two main methods: .Go() and .Wait()
+// ErrPanicRecovered is a special error that is returned when a panic is recovered from a goroutine.
+// It is used to wrap the original panic error and stack trace.
+// You can use errors.Is(err, ErrPanicRecovered) to check if the error was caused by a panic.
+// If the panic value was an error, you can use errors.Unwrap(err) to get the original error.
+var ErrPanicRecovered = errors.New("recovered from panic")
+
+// SyncGroup is the main abstraction for working with syncgroups.
+// A Sync Group is a collection of goroutines that can be waited for.
 //
-// .Go() spawns a new goroutine, which may return an error.
-// The returned error will be saved and returned by .Wait() method.
+// Additionally, SyncGroup collects all errors returned by goroutines,
+// handles panics and provides a way to limit the number of concurrent goroutines.
+// It has four main methods: SetLimit(), Go(), TryGo() and Wait()
 //
-// .Wait() waits until all spawned goroutines finish and returns an Error struct which is a wrapper for a slice of errors.
-// If there was no error, .Wait() would return nil, otherwise it would return GroupError instance.
+// SetLimit() sets a limit for the number of concurrent goroutines.
+// Using SetLimit() is optional, be default there is no limit.
+// Inside it uses a semaphore pattern to limit the number concurrent of goroutines.
+//
+// Go() spawns a new goroutine, which may return an error.
+// When using SetLimit(), Go() will wait until a slot in the semaphore is available.
+// The returned error will be saved and returned by Wait() method.
+//
+// TryGo() is similar to Go(), but it runs a goroutine only if there is a slot in the semaphore.
+// When using SetLimit(), TryGo() will return false and not block, if there are no available slots.
+// If there are available slots, it will run the goroutine and return true.
+// If goroutine is run, the returned error will be saved and returned by Wait() method.
+//
+// Wait() waits until all spawned goroutines finish and returns a wrapper for a slice of errors.
+// If there was no error, Wait() would return nil,
+// otherwise a non nil error, which can be unwrapped to access all errors.
 type SyncGroup struct {
-	wg sync.WaitGroup
+	wg        sync.WaitGroup
+	semaphore chan semaphoreToken
 
 	finishedChan chan []error
 	errorChan    chan error
 
-	listeningStarted        bool
+	listeningStarted        atomic.Bool
 	listeningRoutineStarter *sync.Once
 }
 
-// GroupError is a wrapper for errors which are returned by functions called in spawned goroutines.
-type GroupError struct {
-	Errs []error
-}
+type semaphoreToken struct{}
 
-// Error concatenates all stored errors with ';' symbol and returns a resulting string.
-func (e GroupError) Error() string {
-	builder := strings.Builder{}
-
-	for _, err := range e.Errs {
-		if err != nil {
-			builder.WriteString(err.Error())
-			builder.WriteString(";")
-		}
-	}
-
-	return builder.String()
-}
-
-// New is the default constructor for SyncGroup
+// New is the default constructor for SyncGroup.
 func New() *SyncGroup {
-	g := &SyncGroup{
+	grp := &SyncGroup{
 		wg:                      sync.WaitGroup{},
-		listeningRoutineStarter: new(sync.Once),
+		semaphore:               nil,
 		finishedChan:            make(chan []error),
 		errorChan:               make(chan error),
+		listeningStarted:        atomic.Bool{},
+		listeningRoutineStarter: new(sync.Once),
 	}
 
-	return g
-}
-
-func (g *SyncGroup) listenToErrors() {
-	var accumulatedErrors []error
-
-	for err := range g.errorChan {
-		accumulatedErrors = append(accumulatedErrors, err)
-	}
-
-	g.finishedChan <- accumulatedErrors
-	close(g.finishedChan)
-
-	return
+	return grp
 }
 
 // Go spawns given function in a new goroutine.
-// The returned error will be saved and returned by .Wait() method.
-func (g *SyncGroup) Go(f func() error) {
-	g.listeningRoutineStarter.Do(func() {
-		go g.listenToErrors()
-		g.listeningStarted = true
-	})
+// If group has a limit of concurrent goroutines, goroutine execution will be blocked until a slot is available.
+// The returned error will be saved and returned wrapped by Wait() method.
+func (g *SyncGroup) Go(fnc func() error) {
+	g.startListening()
 
 	g.wg.Add(1)
+
 	go func() {
-		defer func() {
-			if msg := recover(); msg != nil {
-				g.errorChan <- errors.Errorf("recovered from panic: %v\n%s", msg, string(debug.Stack()))
-			}
+		defer g.done()
 
-			g.wg.Done()
-		}()
+		// blocks until semaphore slot is acquired
+		if g.semaphore != nil {
+			g.semaphore <- semaphoreToken{}
+		}
 
-		err := f()
-
+		err := fnc()
 		if err != nil {
 			g.errorChan <- err
 		}
 	}()
 }
 
-// Wait waits until all spawned goroutines are finished and returns a wrapper struct for all collected errors.
+// TryGo is similar to Go, but it runs a goroutine only if there is a slot in the semaphore.
+// If there are available slots, it will run the goroutine and return true.
+// If goroutine is run, the returned error will be saved and returned by Wait() method.
+func (g *SyncGroup) TryGo(fnc func() error) bool {
+	if g.semaphore != nil {
+		select {
+		case g.semaphore <- semaphoreToken{}:
+		default:
+			return false
+		}
+	}
+
+	g.startListening()
+	g.wg.Add(1)
+
+	go func() {
+		defer g.done()
+
+		err := fnc()
+		if err != nil {
+			g.errorChan <- err
+		}
+	}()
+
+	return true
+}
+
+// done is called in every goroutine spawned by SyncGroup in defer statement.
+// Its job is to handle panics, release all resources and decrement the WaitGroup counter.
+func (g *SyncGroup) done() {
+	if msg := recover(); msg != nil {
+		var err error
+
+		switch val := msg.(type) {
+		case error:
+			err = fmt.Errorf("%w: %w\n%s", ErrPanicRecovered, val, string(debug.Stack()))
+		default:
+			err = fmt.Errorf("%w: %v\n%s", ErrPanicRecovered, val, string(debug.Stack()))
+		}
+
+		g.errorChan <- err
+	}
+
+	if g.semaphore != nil {
+		<-g.semaphore
+	}
+
+	g.wg.Done()
+}
+
+// startListening starts a single goroutine that listens to all errors and accumulates them.
+// It should make sure that the goroutine is started only once.
+func (g *SyncGroup) startListening() {
+	g.listeningRoutineStarter.Do(func() {
+		g.listeningStarted.Store(true)
+		go g.listenToErrors()
+	})
+}
+
+// listenToErrors is a goroutine that listens to all errors and accumulates them.
+// When all goroutines are finished, it sends the accumulated errors to the finishedChan.
+func (g *SyncGroup) listenToErrors() {
+	defer func() {
+		close(g.finishedChan)
+	}()
+
+	var accumulatedErrors []error //nolint:prealloc // false positive
+	for err := range g.errorChan {
+		accumulatedErrors = append(accumulatedErrors, err)
+	}
+
+	g.finishedChan <- accumulatedErrors
+}
+
+// Wait waits until all spawned goroutines are finished and returns a wrapped error for all collected errors.
 // The result is nil if none of the spawned goroutines returned an error
 //
-// The result is guaranteed to be an instance of GroupError, so that you can access the stored errors directly.
-// If you only need to check the absence of errors, then only check for nil value.
+// If error is not nil, the result is guaranteed to implement `Unwrap() []errors` methods to access all errors.
+// The error supports unwrapping with standard errors.Unwrap(), errors.Is() and errors.As() functions.
 func (g *SyncGroup) Wait() error {
-	if !g.listeningStarted {
+	if !g.listeningStarted.Load() {
 		return nil
 	}
 
@@ -121,5 +187,22 @@ func (g *SyncGroup) Wait() error {
 		return nil
 	}
 
-	return GroupError{Errs: errs}
+	return errors.Join(errs...)
+}
+
+// SetLimit sets a limit for the number of concurrent goroutines.
+// Using SetLimit() is optional, be default there is no limit.
+// Pass 0 to disable the limit.
+func (g *SyncGroup) SetLimit(limit int) {
+	if g.listeningStarted.Load() {
+		panic("cannot set limit after starting goroutines")
+	}
+
+	if limit <= 0 {
+		g.semaphore = nil
+
+		return
+	}
+
+	g.semaphore = make(chan semaphoreToken, limit)
 }
