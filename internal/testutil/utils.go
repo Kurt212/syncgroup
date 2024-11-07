@@ -50,19 +50,6 @@ func EqualSlices[T1, T2 any](t *testing.T, expected []T1, actual []T2) {
 	}
 }
 
-// Contains is a helper function to check if a value is in a slice.
-func Contains[T any](t *testing.T, slice []T, value T) {
-	t.Helper()
-
-	for i := range slice {
-		if reflect.DeepEqual(slice[i], value) {
-			return
-		}
-	}
-
-	t.Fatalf("expected %v to be in %v", value, slice)
-}
-
 // Panics is a helper function to check if a function panics.
 func Panics(t *testing.T, fnc func(), optionalMessage ...string) {
 	t.Helper()
