@@ -1,160 +1,586 @@
-package syncgroup
+package syncgroup_test
 
 import (
 	"errors"
-	"github.com/stretchr/testify/assert"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/Kurt212/syncgroup"
+	"github.com/Kurt212/syncgroup/internal/testutil"
 )
 
-type MyErr struct {
+type MyError struct {
 	a string
 }
 
-func (m MyErr) Error() string {
+func (m MyError) Error() string {
 	return m.a
 }
 
-func TestListenTo(t *testing.T) {
-	as := assert.New(t)
+func TestGoOK(t *testing.T) {
+	t.Parallel()
 
-	sg := &SyncGroup{
-		wg:           sync.WaitGroup{},
-		finishedChan: make(chan []error),
-		errorChan:    make(chan error),
+	syncgrp := syncgroup.New()
+
+	syncgrp.Go(func() error {
+		return nil
+	})
+
+	syncgrp.Go(func() error {
+		return nil
+	})
+
+	syncgrp.Go(func() error {
+		return nil
+	})
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestTryGoOK(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	syncgrp.TryGo(func() error {
+		return nil
+	})
+
+	syncgrp.TryGo(func() error {
+		return nil
+	})
+
+	syncgrp.TryGo(func() error {
+		return nil
+	})
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestGoWithOneError(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	syncgrp.Go(func() error {
+		return nil
+	})
+
+	returnMyErr := MyError{"123"}
+
+	syncgrp.Go(func() error {
+		return returnMyErr
+	})
+
+	syncgrp.Go(func() error {
+		return nil
+	})
+
+	err := syncgrp.Wait()
+
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 
-	go sg.listenToErrors()
+	if err.Error() != returnMyErr.Error() {
+		t.Fatalf("expected %v, got %v", returnMyErr, err)
+	}
 
-	expected := []error{MyErr{"err1"}, MyErr{"err2"}, MyErr{"err3"}}
-
-	sg.errorChan <- MyErr{"err1"}
-	sg.errorChan <- MyErr{"err2"}
-	sg.errorChan <- MyErr{"err3"}
-
-	close(sg.errorChan)
-
-	res := <-sg.finishedChan
-
-	as.Equal(expected, res)
+	testutil.True(t, errors.Is(err, returnMyErr), "Result error should be found by errors.Is")
 }
 
-func TestSyncOK(t *testing.T) {
-	as := assert.New(t)
+func TestTryGoWithOneError(t *testing.T) {
+	t.Parallel()
 
-	sg := New()
+	syncgrp := syncgroup.New()
 
-	sg.Go(func() error {
+	syncgrp.Go(func() error {
 		return nil
 	})
 
-	sg.Go(func() error {
+	returnMyErr := MyError{"123"}
+
+	syncgrp.TryGo(func() error {
+		return returnMyErr
+	})
+
+	syncgrp.TryGo(func() error {
 		return nil
 	})
 
-	sg.Go(func() error {
-		return nil
-	})
+	err := syncgrp.Wait()
 
-	err := sg.Wait()
-	as.Nil(err)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if err.Error() != returnMyErr.Error() {
+		t.Fatalf("expected %v, got %v", returnMyErr, err)
+	}
+
+	testutil.True(t, errors.Is(err, returnMyErr), "Result error should be found by errors.Is")
 }
 
-func TestSyncBad1(t *testing.T) {
-	as := assert.New(t)
+//nolint:dupl
+func TestGoWithTwoErrors(t *testing.T) {
+	t.Parallel()
 
-	sg := New()
+	firstErr := MyError{"123"}
+	secondErr := MyError{"456"}
 
-	sg.Go(func() error {
+	syncgrp := syncgroup.New()
+
+	syncgrp.Go(func() error {
 		return nil
 	})
 
-	sg.Go(func() error {
-		return MyErr{"123"}
+	syncgrp.Go(func() error {
+		return firstErr
 	})
 
-	sg.Go(func() error {
-		return nil
+	syncgrp.Go(func() error {
+		return secondErr
 	})
 
-	err := sg.Wait()
+	err := syncgrp.Wait()
 
-	as.NotNil(err)
-	as.Equal("123;", err.Error())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	testutil.True(t, errors.Is(err, firstErr), "Result error should be found by errors.Is")
+	testutil.True(t, errors.Is(err, secondErr), "Result error should be found by errors.Is")
+
+	unwrappableErr, ok := err.(interface {
+		Unwrap() []error
+	})
+
+	testutil.True(t, ok, "Result error should be unwrappable and implement Unwrap() []error interface")
+
+	gotErrors := unwrappableErr.Unwrap()
+
+	testutil.True(t, len(gotErrors) == 2, "Result error should contain 2 errors")
 }
 
-func TestSyncBad2(t *testing.T) {
-	as := assert.New(t)
+//nolint:dupl
+func TestTryGoWithTwoErrors(t *testing.T) {
+	t.Parallel()
 
-	sg := New()
+	firstErr := MyError{"123"}
+	secondErr := MyError{"456"}
 
-	sg.Go(func() error {
+	syncgrp := syncgroup.New()
+
+	syncgrp.TryGo(func() error {
 		return nil
 	})
 
-	sg.Go(func() error {
-		return MyErr{"123"}
+	syncgrp.TryGo(func() error {
+		return firstErr
 	})
 
-	sg.Go(func() error {
-		return MyErr{"456"}
+	syncgrp.TryGo(func() error {
+		return secondErr
 	})
 
-	err := sg.Wait()
+	err := syncgrp.Wait()
 
-	as.NotNil(err)
-	as.Contains([]string{"123;456;", "456;123;"}, err.Error())
-}
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
 
-func TestSameErrors(t *testing.T) {
-	as := assert.New(t)
+	testutil.True(t, errors.Is(err, firstErr), "Result error should be found by errors.Is")
+	testutil.True(t, errors.Is(err, secondErr), "Result error should be found by errors.Is")
 
-	err1 := errors.New("i am err1")
-	err2 := errors.New("i am err2")
-
-	sg := New()
-
-	sg.Go(func() error {
-		return err1
+	unwrappableErr, ok := err.(interface {
+		Unwrap() []error
 	})
 
-	sg.Go(func() error {
-		return err2
-	})
+	testutil.True(t, ok, "Result error should be unwrappable and implement Unwrap() []error interface")
 
-	res := sg.Wait().(GroupError)
+	gotErrors := unwrappableErr.Unwrap()
 
-	as.Len(res.Errs, 2)
-	as.Contains(res.Errs, err1)
-	as.Contains(res.Errs, err2)
+	testutil.True(t, len(gotErrors) == 2, "Result error should contain 2 errors")
 }
 
 func TestNoGoroutines(t *testing.T) {
-	as := assert.New(t)
-	sg := New()
+	t.Parallel()
 
-	err := sg.Wait()
-	as.Nil(err)
+	syncgrp := syncgroup.New()
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
 }
 
-func TestHasStacktrace(t *testing.T) {
-	as := assert.New(t)
+func TestGoRecoversNonErrorPanic(t *testing.T) {
+	t.Parallel()
 
-	sg := New()
+	syncgrp := syncgroup.New()
 
-	sg.Go(func() error {
-		panic("aaabbb")
+	panicMsg := "this is message from panic"
+
+	syncgrp.Go(func() error {
+		panic(panicMsg)
 	})
 
-	err := sg.Wait().(GroupError)
+	err := syncgrp.Wait()
 
-	as.Len(err.Errs, 1)
+	testutil.True(
+		t,
+		errors.Is(err, syncgroup.ErrPanicRecovered),
+		"On panic should return special panic error",
+	)
 
-	recErr := err.Errs[0].Error()
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), panicMsg),
+		"Error should contain panic message",
+	)
 
-	const startsWith = "recovered from panic: aaabbb\n"
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), "goroutine"),
+		"Error should contain stack trace",
+	)
+}
 
-	as.True(len(recErr) > len(startsWith))
-	as.True(strings.HasPrefix(recErr, startsWith))
+func TestTryGoRecoversNonErrorPanic(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	panicMsg := "this is message from panic"
+
+	syncgrp.TryGo(func() error {
+		panic(panicMsg)
+	})
+
+	err := syncgrp.Wait()
+
+	testutil.True(
+		t,
+		errors.Is(err, syncgroup.ErrPanicRecovered),
+		"On panic should return special panic error",
+	)
+
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), panicMsg),
+		"Error should contain panic message",
+	)
+
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), "goroutine"),
+		"Error should contain stack trace",
+	)
+}
+
+func TestGoRecoversErrorPanic(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	panicErr := errors.New("this is error from panic") //nolint:err113
+
+	syncgrp.Go(func() error {
+		panic(panicErr)
+	})
+
+	err := syncgrp.Wait()
+
+	testutil.True(
+		t,
+		errors.Is(err, syncgroup.ErrPanicRecovered),
+		"On panic should return special panic error",
+	)
+
+	testutil.True(
+		t,
+		errors.Is(err, panicErr),
+		"Error should wrap panic error",
+	)
+
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), "goroutine"),
+		"Error should contain stack trace",
+	)
+}
+
+func TestTryGoRecoversErrorPanic(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	panicErr := errors.New("this is error from panic") //nolint:err113
+
+	syncgrp.TryGo(func() error {
+		panic(panicErr)
+	})
+
+	err := syncgrp.Wait()
+
+	testutil.True(
+		t,
+		errors.Is(err, syncgroup.ErrPanicRecovered),
+		"On panic should return special panic error",
+	)
+
+	testutil.True(
+		t,
+		errors.Is(err, panicErr),
+		"Error should wrap panic error",
+	)
+
+	testutil.True(
+		t,
+		strings.Contains(err.Error(), "goroutine"),
+		"Error should contain stack trace",
+	)
+}
+
+func TestLimitGoroutinesWithGo(t *testing.T) {
+	t.Parallel()
+
+	const limit = 2
+
+	syncgrp := syncgroup.New()
+	syncgrp.SetLimit(limit)
+
+	activeCount := atomic.Int32{}
+
+	runnableFunc := func() error {
+		active := activeCount.Add(1)
+		defer activeCount.Add(-1)
+
+		if active > limit {
+			t.Errorf("expected %d active goroutines, got %d", limit, active)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		return nil
+	}
+
+	const goroutinesCount = 10
+
+	for range goroutinesCount {
+		syncgrp.Go(runnableFunc)
+	}
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestLimitGoroutinesWithTryGo(t *testing.T) {
+	t.Parallel()
+
+	const limit = 2
+
+	syncgrp := syncgroup.New()
+	syncgrp.SetLimit(limit)
+
+	activeCount := atomic.Int32{}
+
+	runnableFunc := func() error {
+		active := activeCount.Add(1)
+		defer activeCount.Add(-1)
+
+		if active > limit {
+			t.Errorf("expected %d active goroutines, got %d", limit, active)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		return nil
+	}
+
+	const goroutinesCount = 10
+
+	for range goroutinesCount {
+		syncgrp.TryGo(runnableFunc)
+	}
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestTryGoReturnsValidValue(t *testing.T) {
+	t.Parallel()
+
+	const limit = 2
+
+	syncgrp := syncgroup.New()
+	syncgrp.SetLimit(limit)
+
+	stopChan := make(chan struct{})
+
+	runnableFunc := func() error {
+		<-stopChan
+
+		return nil
+	}
+
+	const goroutinesCount = 10
+
+	failedToRun := 0
+
+	for range goroutinesCount {
+		ok := syncgrp.TryGo(runnableFunc)
+		if !ok {
+			failedToRun++
+		}
+	}
+
+	testutil.Equal(t, failedToRun, goroutinesCount-limit)
+
+	close(stopChan)
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestCanNotChangeLimitAfterGo(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	stopChan := make(chan struct{})
+
+	syncgrp.Go(func() error {
+		<-stopChan
+
+		return nil
+	})
+
+	testutil.Panics(t, func() {
+		syncgrp.SetLimit(1)
+	})
+
+	close(stopChan)
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestCanNotChangeLimitAfterTryGo(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	stopChan := make(chan struct{})
+
+	syncgrp.TryGo(func() error {
+		<-stopChan
+
+		return nil
+	})
+
+	testutil.Panics(t, func() {
+		syncgrp.SetLimit(1)
+	})
+
+	close(stopChan)
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestUnsetLimitWorksWithGo(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	syncgrp.SetLimit(1)
+	syncgrp.SetLimit(0)
+
+	stopChan := make(chan struct{})
+
+	activeGoroutines := atomic.Int32{}
+
+	const goroutinesCount = 10
+
+	gouroutineFunc := func() error {
+		activeGoroutines.Add(1)
+		defer activeGoroutines.Add(-1)
+
+		<-stopChan
+
+		return nil
+	}
+
+	for range goroutinesCount {
+		syncgrp.Go(gouroutineFunc)
+	}
+
+	for activeGoroutines.Load() != goroutinesCount {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(stopChan)
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestUnsetLimitWorksWithTryGo(t *testing.T) {
+	t.Parallel()
+
+	syncgrp := syncgroup.New()
+
+	syncgrp.SetLimit(1)
+	syncgrp.SetLimit(0)
+
+	stopChan := make(chan struct{})
+
+	activeGoroutines := atomic.Int32{}
+
+	const goroutinesCount = 10
+
+	goroutineFunc := func() error {
+		activeGoroutines.Add(1)
+		defer activeGoroutines.Add(-1)
+
+		<-stopChan
+
+		return nil
+	}
+
+	for range goroutinesCount {
+		syncgrp.TryGo(goroutineFunc)
+	}
+
+	for activeGoroutines.Load() != goroutinesCount {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(stopChan)
+
+	err := syncgrp.Wait()
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
 }
